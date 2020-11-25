@@ -1,0 +1,171 @@
+#pragma numlittype(push, TRUE)
+#pragma warning(error : 15618)
+#include <origin.h>
+#include <oc_nag.h>
+#include <ONLSF.H>
+
+// Add your special include files here.
+// For example, if you want to fit with functions from the NAG library, 
+// add the header file for the NAG functions here.
+
+// Add code here for other Origin C functions that you want to define in this file,
+// and access in your fitting function.
+
+// You can access C functions defined in other files, if those files are loaded and compiled 
+// in your workspace, and the functions have been prototyped in a header file that you have
+// included above. 
+
+// You can access NLSF object methods and properties directly in your function code.
+
+// You should follow C-language syntax in defining your function. 
+// For instance, if your parameter name is P1, you cannot use p1 in your function code. 
+// When using fractions, remember that integer division such as 1/2 is equal to 0, and not 0.5
+// Use 0.5 or 1/2.0 to get the correct value.
+
+// For more information and examples, please refer to the "User-Defined Fitting Function" 
+// section of the Origin Help file.
+struct user   // parameter in the ODE
+{
+  double a;
+};
+
+//Define the differentiate equation: y'=a*y
+static void NAG_CALL f(Integer neq, double t, double y[], double yp[], Nag_User *comm)
+{
+  neq; //Number of ordinary differential equations
+  t; //Independent variable
+  y; //Dependent variables
+  yp; //First derivative
+	
+  struct user *sp = (struct user *)(comm->p);
+  
+  double a;
+		
+  a = sp->a;
+	
+  yp[0] = -a*y[0]*y[0]-23470*y[0];
+}
+
+
+//Use Runge-Kutta ODE23 to solve ODE
+static bool nag_ode_fit( const double a, const double y0, const double tstart, 
+  const double tend, const int nout, vector &vP )
+{
+  //nout: Number of points to output	
+  if( nout < 2 )
+    return false;
+	
+  vP.SetSize( nout );
+  vP[0] = y0;
+	
+  int neq = 1; //Number of ordinary differential equations
+  Nag_RK_method method;
+	
+  double hstart, tgot, tinc;
+ 
+  double tol, twant;
+  int i, j;
+	
+  vector thres(neq), ygot(neq), ymax(neq), ypgot(neq), ystart(neq);
+		
+  Nag_ErrorAssess errass;
+  Nag_ODE_RK opt;
+  Nag_User comm;
+	
+  struct user s;
+  s.a = a;
+  comm.p = (Pointer)&s;
+	
+  ystart[0] = y0;
+
+  for (i=0; i<neq; i++)
+    thres[i] = 1.0e-8;
+
+  errass = Nag_ErrorAssess_off;
+
+  hstart = 0;
+  method = Nag_RK_2_3;
+	
+  tinc = (tend-tstart)/(nout-1);
+	
+  tol = 1.0e-9;
+	
+  NagError nagErr1;
+  //Setup ODE
+  d02pvc(neq, tstart, ystart, tend, tol, thres, method,
+    Nag_RK_range, errass, hstart, &opt, &nagErr1);
+	
+  if( nagErr1.code != NE_NOERROR )
+    return false;
+	
+  for (j=1; j<nout; j++)
+  {
+    twant = tstart + j*tinc;
+		
+    NagError nagErr2;
+    //Solve ODE
+    d02pcc(neq, f, twant, &tgot, ygot, ypgot, ymax, &opt, &comm, &nagErr2);
+		
+    if( nagErr2.code != NE_NOERROR )
+	return false;
+		
+    vP[j] = ygot[0];
+  }
+
+  //Free functions for Runge–Kutta suite	
+
+
+
+
+
+
+
+
+
+
+
+
+
+  d02ppc(&opt);
+
+  return true;
+}
+
+//----------------------------------------------------------
+// 
+void _nlsfFitODE(
+// Fit Parameter(s):
+double a, double y0,
+// Independent Variable(s):
+double x,
+// Dependent Variable(s):
+double& y)
+{
+	// Beginning of editable part
+	NLFitContext *pCtxt = Project.GetNLFitContext();
+	if ( pCtxt )
+	{
+	  static vector vX, vY;
+	  static int nSize;
+	
+	  BOOL bIsNewParamValues = pCtxt->IsNewParamValues();
+	  // If parameters were updated, we will recalculate the ODE result.
+	  if ( bIsNewParamValues )
+	  {
+	    //Initial and final values of the independent variable
+	    double tstart = 1e-6, tend = 7e-4, tinc;
+	    int nout = 350; //Number of points
+		
+	    tinc = (tend-tstart)/(nout-1);
+	    vX.Data( tstart, tend, tinc );
+	    nSize = vX.GetSize();
+		
+	    if( !nag_ode_fit( a, y0, tstart, tend, nout, vY) )
+	      return;
+	  }
+	
+	  //Interpolate y from fitting data's x on the ODE result.
+	  ocmath_interpolate( &x, &y, 1, vX, vY, nSize );
+	}
+	// End of editable part
+}
